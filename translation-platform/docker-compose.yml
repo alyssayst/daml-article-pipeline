@@ -1,0 +1,62 @@
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-translator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-translator_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-translation_platform}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-translator} -d $${POSTGRES_DB:-translation_platform}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-translator}:${POSTGRES_PASSWORD:-translator_pass}@db:5432/${POSTGRES_DB:-translation_platform}}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg2://${POSTGRES_USER:-translator}:${POSTGRES_PASSWORD:-translator_pass}@db:5432/${POSTGRES_DB:-translation_platform}}
+      DEEPL_API_KEY: ${DEEPL_API_KEY:-}
+      DEEPL_FORMALITY: ${DEEPL_FORMALITY:-default}
+      SOURCE_LANG: ${SOURCE_LANG:-EN}
+      TARGET_LANG: ${TARGET_LANG:-JA}
+      STALE_JOB_TIMEOUT_MINUTES: ${STALE_JOB_TIMEOUT_MINUTES:-10}
+      SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
+      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME:-}
+      GCS_SERVICE_ACCOUNT_JSON: ${GCS_SERVICE_ACCOUNT_JSON:-}
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend/app:/app/app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+    command: npm run dev
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
